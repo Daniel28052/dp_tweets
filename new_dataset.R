@@ -38,6 +38,7 @@ followers_max <- user_data%>%
 
 followers_max
 
+
 followers_max%>%
   ggplot(aes(x = user_id, followers_count)) +
   geom_point() + 
