@@ -1,6 +1,12 @@
 library(tidyverse)
 library(tidytext)
 library(purrr)
+library(haven)
+library(SnowballC)
+library(stopwords)
+library(scales)
+library(ggpubr)
+library(lubridate)
 ##library(textcat)
 ##library(tm)
 ##library(quanteda)
@@ -511,9 +517,29 @@ data_tweets_1 <- data_tweets %>%
   mutate(text = str_replace_all(text, "[^[:alnum:]]"," "))
 
 
+
+
+#cleaning
+remove_reg <- "&amp;|&lt;|&gt;|\\d+\\w*\\d*|#\\w+|[^\x01-\x7F]|[[:punct:]]|https\\S*"
+# &amp = @
+# &lt;= <
+# &gt; >
+
+
+#removing retweets characters
+tidy_tweets <- tweets %>% 
+  filter(!str_detect(text, "^RT")) %>%
+  mutate(text = str_remove_all(text, remove_reg))
+
+
+
 ################################################################################
-########################### Explore data #######################################
+############################## Explore data ####################################
 ################################################################################
+
+data_tweets_1 <- data_tweets%>%
+  filter(str_detect(text, "[^0-9]"))%>%
+  mutate(text = str_remove_all(text, "[1234567890]"))
 
 ## How many users by condition
 data_tweets_1%>%
@@ -544,48 +570,157 @@ data_tweets_1 %>%
   ggplot(aes(x = TextLength, fill = Condition)) + 
   geom_histogram(binwidth = 5) +
   labs(y = "Text count", x = "Text Length", 
-       title = "Distribution of text length by condition")
-theme_bw() 
+       title = "Distribution of text length by condition") +
+  theme_bw() 
 
 ################################################################################
-############################# Tokenizing #######################################
+############################## Tokenizing ######################################
 ################################################################################
 
 ## Tokenization as explained in https://www.tidytextmining.com/tidytext.html 
 ## select variables of interest, filter out symbols and numbers
 unn_data_tweets <- data_tweets_1%>%
-  select(text,created,Condition)%>%
+  select(text,created,Condition, TextLength)%>%
   filter(str_detect(text, "[^0-9]"))%>%
   mutate(text = str_remove_all(text, "[1234567890]"))%>%
   unnest_tokens(word, text)
 
 
+
 ## replace specific words
-unn_data_tweets_1$word <- unn_data_tweets_1$word%>%
+unn_data_tweets$word <- unn_data_tweets$word%>%
   str_replace("^u$", "you")%>%
   str_replace("^m$", "me")%>%
   str_replace("^don$", "don't")%>%
   str_replace("^ll$", "will")%>%
   str_replace("^hes$", "he")%>%
   str_replace("^th$", "the")%>%
-  str_replace("^nd$", "and")
+  str_replace("^nd$", "and")%>%
+  str_replace("^b$", "be")%>%
+  str_replace("^d$", "would")%>%
+  str_replace("^bc$", "because")%>%
+  str_replace("^bb$", "bye")%>%
+  str_replace("^c$", "see")%>%
+  str_replace("^thi$", "nothing")%>%
+  str_replace("ar$", "are")%>%
+  str_replace("wa$", "want")%>%
+  str_replace("^thei$", "they")
+  
 
 
 ## filter unwanted words
 unn_data_tweets_1 <- unn_data_tweets%>%
-  filter(!word %in% c("f", "zod","ziyech","https", "t", "co","kxffdubxc","fd","btmstdha","s",
+  filter(!word %in% c("f","a","e", "zod","ziyech","https", "t", "co","kxffdubxc","fd","btmstdha","s",
                       "mysglsswv","yqrvfrkk","kdegdto","bfg","ejebpzcet","chi","frkluz",
                       "daqcbzisb","qyswoqlfm","oszbaeeqme","mkbvlegqv","mseoqdjxw","anfeylzsd",
                       "cyjfikd","xmvlbhfwzg","mlnbulfvf","oiefvfecel","ihnapez","zmrmkwzbv","mnbvnruw",
                       "frufblivu","nyqpbssw","cqxpvgx","chmbspgzr","wwyqofmk","pglynfylh","kingttjqo",
                       "iincqwre","naboregjeringene","regjeringen","cdykmjp","ybmfqnjtlf","ff","ffe","ofegujiq",
-                      "hvordan","wzgsenneut","ontfgb","rshdzipmi","urllib","rshdzipmi","whugjsella","gt"))
+                      "hvordan","wzgsenneut","ontfgb","rshdzipmi","urllib","rshdzipmi","whugjsella","gt", "bcd",
+                      "fc","ba", "fa", "t.co"))
 
-View(unn_data_tweets_1)
+
+## Write and read csv
+setwd("C:/Users/danie/Desktop/dp_tweets")
+write_csv(unn_data_tweets_1, "unn_data_tweets_1.csv")
+unn_data_tweets_1 <-  read_csv("unn_data_tweets_1.csv")
+
+
+################################################################################
+######################### Count word frequency #################################
+################################################################################
+
+## add a column counting how many words per condition and plot
+unn_tweets <- unn_data_tweets_1%>%
+  count(word, Condition, sort = TRUE)%>%
+  ungroup()
+
+unn_tweets%>%
+  group_by(Condition)%>%
+  slice_max(n, n = 10)%>%
+  ungroup()%>%
+  mutate(word = reorder(word, n))%>%
+  ggplot(aes(n, word, fill = Condition)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Condition, scales = "free_y") +
+  labs(x = "Condition",
+       y = NULL) + 
+  scale_x_continuous(labels = function(x) format(x, scientific = FALSE))
+
+
+## remove stopwords and plot word frequency by condition
+unn_tweets_2 <- unn_tweets%>%
+  filter(!(word %in% stopwords(source = "snowball")))%>%
+  filter(!word %in% c("ea","fef","bf","ed","eb","bbe","bbf","n","bae","ec","baa","de","fff","ng",
+                      "fb","af","cb"))
+
+unn_tweets_2%>%
+  group_by(Condition)%>%
+  slice_max(n, n = 10)%>%
+  ungroup()%>%
+  mutate(word = reorder(word, n))%>%
+  ggplot(aes(n, word, fill = Condition)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Condition, scales = "free_y") +
+  labs(x = "Condition",
+       y = NULL) + 
+  scale_x_continuous(labels = function(x) format(x, scientific = FALSE))
+
+
+
+## comparing word frequency by condition
+frequency <- unn_tweets_2%>%
+  mutate(word = str_extract(word, "[a-z']+")) %>%
+  count(Condition, word) %>%
+  group_by(Condition) %>%
+  mutate(proportion = n / sum(n)) %>% 
+  select(-n) %>% 
+  filter(proportion>0.000004)%>%
+  pivot_wider(names_from = Condition, values_from = proportion)
+
+
+frequency <- na.omit(frequency)
+frequency <- frequency%>%
+  filter(!word %in% c("a","m","s","x","itz","ak","al","c","b","k","r","e","df",
+  "a'tin","f","j","d","ae","tsm","aj","ej","the","bini","aespa","ad","ah","ii","sana",
+  "t","bts","el","o","h","g","sid","an","ab","vj","eu","da","n","l","la","mo","p","woodz",
+  "mz","fn","ph","og","em","aaj","ai","aba","aimeeke","cfc","afc"))
+
+## plot word correlation between conditions
+ggplot(frequency, aes(x = Depressed, y = Healthy)) +
+  geom_abline(color = "slateblue", lty = 2) +
+  geom_jitter(alpha = 0.1, size = 2.5, width = 0.3, height = 0.3, color = "chartreuse4") +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_log10(labels = percent_format()) +
+  scale_y_log10(labels = percent_format()) +
+  scale_color_gradient(limits = c(0, 0.001), 
+                       low = "darkslategray4", high = "gray75") +
+  theme(legend.position="none") +
+  labs(y = "Healthy Tweets", x = "Depressed Tweets")
+
+## test word correlation between conditions
+cor.test(frequency$Depressed, frequency$Healthy)
+
+
+
+
+## Stemming 
+stemmed_tweets <- unn_tweets_2%>%
+  mutate(stem = wordStem(word)) %>%
+  group_by(Condition)%>%
+  count(stem, sort = TRUE)
+
+stemmed_tweets$stem <- stemmed_tweets$stem%>%
+  str_replace("^thi$", "thing")%>%
+  str_replace("^thei$", "they")
 
 ## Write and read a csv file with tokenized data to avoid loading everything
-write_csv(unn_data_tweets_1, "tkn_tweets.csv")
-unn_tweets <- read_csv("tkn_tweets.csv")
+write_csv(stemmed_tweets, "stemmed_tweets.csv")
+stemmed_tweets <- read_csv("stemmed_tweets.csv")
+
+
+
+
 
 
 
@@ -595,12 +730,15 @@ unn_tweets <- read_csv("tkn_tweets.csv")
 ##                                   ###
 ## trial with subset (sliced) sample ###
 ##                                   ###
-tweets_sliced <- unn_tweets%>%
+tweets_sliced <- stemmed_tweets%>%
   slice(321200:321300)
 tweets_sliced
+
+
 
 
 
 ################################################################################
 ##################### Temporal Features ########################################
 ################################################################################
+
