@@ -11,7 +11,7 @@ library(lubridate)
 ##library(tm)
 ##library(quanteda)
 ##library(tokenizers)
-
+options(scipen=999)
 
 ################################################################################
 ########################### joining depression data ############################
@@ -493,7 +493,7 @@ setwd("D:/Research/Vasilis Stavropoulos/Digital Phenotype/Twitter data")
 write_csv(non_dup_full_data, "dep_health_tweets.csv")
 
 ################################################################################
-############################### Read dataset ###################################
+############################# Read raw dataset #################################
 ################################################################################
 
 ## this dataset is available from
@@ -503,7 +503,7 @@ setwd("D:/Research/Vasilis Stavropoulos/Digital Phenotype/Twitter data")
 data_tweets <- read_csv("dep_health_tweets.csv")
 
 ################################################################################
-########################## Load and clean data #################################
+############################### clean data #####################################
 ################################################################################
 
 ## Checking for missing values 
@@ -514,32 +514,28 @@ data_tweets$Condition <- as.factor(data_tweets$Condition)
 
 ## remove all non-alphanumeric characters and replace with a space
 data_tweets_1 <- data_tweets %>%
-  mutate(text = str_replace_all(text, "[^[:alnum:]]"," "))
+  mutate(text = str_remove_all(text, "[^[:alnum:]]"))
 
-
-
-
-#cleaning
+## cleaning
 remove_reg <- "&amp;|&lt;|&gt;|\\d+\\w*\\d*|#\\w+|[^\x01-\x7F]|[[:punct:]]|https\\S*"
 # &amp = @
 # &lt;= <
 # &gt; >
 
 
-#removing retweets characters
-tidy_tweets <- tweets %>% 
+## removing retweets characters
+data_tweets <- data_tweets %>% 
   filter(!str_detect(text, "^RT")) %>%
   mutate(text = str_remove_all(text, remove_reg))
 
+data_tweets_1 <- data_tweets%>%
+  filter(str_detect(text, "[^0-9]"))%>%
+  mutate(text = str_remove_all(text, "[1234567890]"))
 
 
 ################################################################################
 ############################## Explore data ####################################
 ################################################################################
-
-data_tweets_1 <- data_tweets%>%
-  filter(str_detect(text, "[^0-9]"))%>%
-  mutate(text = str_remove_all(text, "[1234567890]"))
 
 ## How many users by condition
 data_tweets_1%>%
@@ -552,7 +548,7 @@ data_tweets_1%>%
 
 ## Add a column with text length and inspect summary of Text Length for both conditions
 data_tweets_1$TextLength <- nchar(data_tweets_1$text)
-summary(data_tweets_1$TextLength)
+skimr::skim(data_tweets_1$TextLength)
 
 ## Inspect summary of Text Length for depressed
 data_tweets_d <- data_tweets_1%>%
@@ -574,17 +570,105 @@ data_tweets_1 %>%
   theme_bw() 
 
 ################################################################################
+############################ Temporal Features #################################
+################################################################################
+data_tweets_1<-data_tweets_1%>%
+  mutate(timestamp=lubridate::ymd_hms(created),
+         day_of_week=lubridate::wday(timestamp, label=TRUE),
+         day_weekday=(lubridate::wday(timestamp) %in% 2:6))
+
+
+## Most tweeted day - overall sample
+data_tweets_1%>%count(day_of_week, sort=TRUE)
+
+## Tweets during the week vs weekend - overall sample
+data_tweets_1%>%count(day_weekday, sort=TRUE)
+
+## Comparing tweet frequency by day across conditions
+frequency_by_day <- data_tweets_1%>%
+  group_by(Condition)%>%
+  count(day_of_week, sort=TRUE)
+
+data_tweets_1%>%
+  group_by(Condition)%>%
+  count(day_of_week, sort=TRUE)%>%
+  ggplot(aes(x = `day_of_week`, y = n, group = Condition, color = Condition)) +
+  geom_line(size = 1.5) + 
+  labs(y = "Tweet frequency", x = "Day of the Week", title = "Frequency of Tweets by day") + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"))
+
+
+## two way anova - condition and day of week on tweet frequency
+frequency_by_day$Condition <- as.factor(frequency_by_day$Condition)
+
+frequency_by_day%>%
+  group_by(Condition) %>%
+  summarise(
+    count = n(),
+    mean = mean(n, na.rm = TRUE),
+    sd = sd(n, na.rm = TRUE))
+
+anova_by_day <- aov(n ~Condition+day_of_week, data =frequency_by_day)
+summary(anova_by_day)
+
+
+## Comparing tweet frequency weekday vs weekend across conditions
+frequency_by_weekend <- data_tweets_1%>%
+  group_by(Condition)%>%
+  count(day_weekday, sort=TRUE)
+
+frequency_by_weekend$day_weekday <- as.factor(frequency_by_weekend$day_weekday)
+frequency_by_weekend$day_weekday <- recode_factor(frequency_by_weekend$day_weekday,`TRUE`="Weekday",`FALSE` = "Weekend")
+
+frequency_by_weekend%>%
+  ggplot(aes(x = `day_weekday`, y = n, group = Condition, color = Condition)) +
+  geom_line(size = 1.5) + 
+  labs(y = "Tweet frequency", x = "Day of the Week", title = "Frequency of Tweets by day") + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"))
+
+## two way anova - condition and day of week on tweet frequency
+frequency_by_weekend$day_weekday <- as.factor(frequency_by_weekend$day_weekday)
+
+frequency_by_weekend%>%
+  group_by(Condition) %>%
+  summarise(
+    count = n(),
+    mean = mean(n, na.rm = TRUE),
+    sd = sd(n, na.rm = TRUE))
+
+anova_by_weekend <- aov(n ~ Condition*day_weekday, frequency_by_weekend)
+summary(anova_by_weekend)
+
+
+################################################################################
+############################# Read clean dataset ###############################
+################################################################################
+
+write_excel_csv(data_tweets_1, "clean_tweets.csv")
+data_tweets_1 <- read_csv("clean_tweets.csv")
+
+
+
+unn_data_tweets <- data_tweets_1%>%
+  select(text,created,Condition, TextLength)%>%
+  unnest_tokens(word, text)
+
+
+################################################################################
 ############################## Tokenizing ######################################
 ################################################################################
 
 ## Tokenization as explained in https://www.tidytextmining.com/tidytext.html 
-## select variables of interest, filter out symbols and numbers
+
 unn_data_tweets <- data_tweets_1%>%
   select(text,created,Condition, TextLength)%>%
-  filter(str_detect(text, "[^0-9]"))%>%
-  mutate(text = str_remove_all(text, "[1234567890]"))%>%
   unnest_tokens(word, text)
-
 
 
 ## replace specific words
@@ -604,7 +688,8 @@ unn_data_tweets$word <- unn_data_tweets$word%>%
   str_replace("^thi$", "nothing")%>%
   str_replace("ar$", "are")%>%
   str_replace("wa$", "want")%>%
-  str_replace("^thei$", "they")
+  str_replace("^thei$", "they")%>%
+  str_replace("^im$","i")
   
 
 
@@ -617,14 +702,12 @@ unn_data_tweets_1 <- unn_data_tweets%>%
                       "frufblivu","nyqpbssw","cqxpvgx","chmbspgzr","wwyqofmk","pglynfylh","kingttjqo",
                       "iincqwre","naboregjeringene","regjeringen","cdykmjp","ybmfqnjtlf","ff","ffe","ofegujiq",
                       "hvordan","wzgsenneut","ontfgb","rshdzipmi","urllib","rshdzipmi","whugjsella","gt", "bcd",
-                      "fc","ba", "fa", "t.co"))
+                      "fc","ba", "fa", "t.co","aa","aaa","aaaa","aaaaa","aaaaaa","aaaaaaa","aaaaaaaa"))
 
 
 ## Write and read csv
-setwd("C:/Users/danie/Desktop/dp_tweets")
 write_csv(unn_data_tweets_1, "unn_data_tweets_1.csv")
 unn_data_tweets_1 <-  read_csv("unn_data_tweets_1.csv")
-
 
 ################################################################################
 ######################### Count word frequency #################################
@@ -738,7 +821,4 @@ tweets_sliced
 
 
 
-################################################################################
-##################### Temporal Features ########################################
-################################################################################
 
