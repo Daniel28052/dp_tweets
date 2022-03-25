@@ -1,0 +1,145 @@
+---
+title: "Collecting User Profiles"
+author: "DZ"
+date: "24/03/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load packages and run functions
+```{r message=FALSE}
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(jsonlite)
+library(httr)
+options(scipen=999)
+
+# FUNCTIONS - need to be run first
+
+#----------------------
+# FUNCTION 1
+#---------------------- 
+#get twitter bearer token from .Renviron and add it to header
+get_auth_headers<-function(){
+    #get token from the environment var
+bearer_token<-Sys.getenv('TWITTER_BEARER')
+
+if (identical(bearer_token, "")){
+  stop("check your Twitter bearer_token in the .Renviron file")
+}
+headers = c(
+  `Authorization` = sprintf('Bearer %s', bearer_token)
+)
+ return (headers)
+}
+
+
+#-----------------------
+# FUNCTION 2
+#-----------------------
+
+#building a query - generic
+build_query<-function(endpoint_url, params, auth_headers=get_auth_headers()){
+  
+  #App rate limit: 300 requests per 15-minute window shared among all users of your app
+  #App rate limit: 1 request per second shared among all users of your app
+  time0<-Sys.time()
+ # print(auth_headers) # debug
+  response<- httr::GET(
+    endpoint_url,
+    httr::add_headers(auth_headers), query = params)
+  
+  #checking time rate
+  time_dif<-as.numeric(Sys.time()- time0)
+  if (time_dif<1) {(
+    Sys.sleep(1)
+    )
+    }
+  
+  #check errors
+  status_code<-httr::status_code(response)
+ # print(paste0("Status code:", status_code))
+  
+  
+  if(status_code(response)!=200) {
+    stop(paste(" error code:", status_code ))
+  }
+  
+  df <-jsonlite::fromJSON(httr::content(response, "text"))
+  df
+}
+
+```
+
+Collect depressed users and automatically replace twitter handle with 'id code'
+```{r}
+#collect data from Twitter using parameters
+params <- list(
+  'query' = '"I have been diagnosed with depression" lang:en',
+  'start_time' = "2021-01-01T00:00:00.000Z",
+  'expansions' = 'author_id,in_reply_to_user_id,geo.place_id',
+  'tweet.fields' = 'author_id,conversation_id,created_at,geo,id,in_reply_to_user_id,lang,referenced_tweets,source,text',
+  'user.fields' = 'id,name,username,created_at,description,public_metrics,verified',
+  'place.fields' = 'full_name,id,country,country_code,geo,name,place_type'
+)
+
+data<-search_tweets(params)
+#saving to csv
+data%>%flatten()%>%write_csv( 
+           file = "depression.csv")
+
+data<-read_csv("depression.csv")
+
+#list of unique users
+usernames<-data%>%distinct(author_id)
+
+#recoding - id_code is the "new code" instead of author_id
+usernames$id_code<-seq(1, nrow(usernames),1)
+#adding id_code variable to the data - you can later remove author_id column to "anonymise" 
+data_coded<-left_join(data, usernames)
+
+#list of users who "complained" more than once
+
+users_with_multiple<-data%>%
+  count(author_id, sort=TRUE)%>%
+filter(n>=2)
+```
+
+Collect non-depressed users and automatically replace twitter handle with 'id code'
+```{r}
+#collect data from Twitter using parameters
+params_h <- list(
+  'query' = '"I am happy" lang:en',
+  'start_time' = "2021-01-01T00:00:00.000Z",
+  'expansions' = 'author_id,in_reply_to_user_id,geo.place_id',
+  'tweet.fields' = 'author_id,conversation_id,created_at,geo,id,in_reply_to_user_id,lang,referenced_tweets, 
+                    public_metrics, source,text',
+  'user.fields' = 'id,name,username,created_at,description,public_metrics,verified',
+  'place.fields' = 'full_name,id,country,country_code,geo,name,place_type'
+)
+
+data_h<-search_tweets(params_h)
+#saving to csv
+data_h%>%flatten()%>%write_csv( 
+           file = "happy.csv")
+
+data_h<-read_csv("happy.csv")
+
+#list of unique users
+usernames_h<-data_h%>%distinct(author_id)
+
+#recoding - id_code is the "new code" instead of author_id
+usernames_h$id_code<-seq(1, nrow(usernames_h),1)
+#adding id_code variable to the data - you can later remove author_id column to "anonymise" 
+data_coded_h<-left_join(data_h, usernames_h)
+
+#list of users who "complained" more than once
+
+users_with_multiple<-data_h%>%
+  count(author_id, sort=TRUE)%>%
+filter(n>=2)
+```
