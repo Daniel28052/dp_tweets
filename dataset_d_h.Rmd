@@ -9,6 +9,8 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+Daniel wants to have in parameters - follower count, following count
+
 Load packages and run functions
 ```{r message=FALSE}
 library(readr)
@@ -118,7 +120,7 @@ params_h <- list(
   'expansions' = 'author_id,in_reply_to_user_id,geo.place_id',
   'tweet.fields' = 'author_id,conversation_id,created_at,geo,id,in_reply_to_user_id,lang,referenced_tweets, 
                     public_metrics, source,text',
-  'user.fields' = 'id,name,username,created_at,description,public_metrics,verified',
+  'user.fields' = 'created_at,description,entities,id,location,name,pinned_tweet_id,profile_image_url,protected,public_metrics,url,username,verified,withheld',
   'place.fields' = 'full_name,id,country,country_code,geo,name,place_type'
 )
 
