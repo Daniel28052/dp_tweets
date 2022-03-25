@@ -142,4 +142,5 @@ data_coded_h<-left_join(data_h, usernames_h)
 users_with_multiple<-data_h%>%
   count(author_id, sort=TRUE)%>%
 filter(n>=2)
+
 ```
