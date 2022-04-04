@@ -7,11 +7,8 @@ library(stopwords)
 library(scales)
 library(ggpubr)
 library(lubridate)
-##library(textcat)
-##library(tm)
-##library(quanteda)
-##library(tokenizers)
-options(scipen=999)
+library(patchwork)
+options("scipen"=999, "digits" = 4)
 
 ################################################################################
 ########################### joining depression data ############################
@@ -572,10 +569,15 @@ data_tweets_1 %>%
 ################################################################################
 ############################ Temporal Features #################################
 ################################################################################
+data_tweets_1 <- read_csv(data_tweets_1, "data_tweets_1.csv")
+
+
 data_tweets_1<-data_tweets_1%>%
   mutate(timestamp=lubridate::ymd_hms(created),
          day_of_week=lubridate::wday(timestamp, label=TRUE),
-         day_weekday=(lubridate::wday(timestamp) %in% 2:6))
+         day_weekday=(lubridate::wday(timestamp) %in% 2:6),
+         month=lubridate::month(timestamp),
+         hour=lubridate::hour(timestamp))
 
 
 ## Most tweeted day - overall sample
@@ -589,16 +591,16 @@ frequency_by_day <- data_tweets_1%>%
   group_by(Condition)%>%
   count(day_of_week, sort=TRUE)
 
-data_tweets_1%>%
+ss1 <- data_tweets_1%>%
   group_by(Condition)%>%
   count(day_of_week, sort=TRUE)%>%
   ggplot(aes(x = `day_of_week`, y = n, group = Condition, color = Condition)) +
   geom_line(size = 1.5) + 
-  labs(y = "Tweet frequency", x = "Day of the Week", title = "Frequency of Tweets by day") + 
+  labs(y = "Tweet frequency", x = "Frequency of Tweets by day", title = "") + 
   theme(plot.title = element_text(face = "bold", hjust = 0.5), 
         axis.title.x = element_text(face = "bold"),
         axis.title.y = element_text(face = "bold"),
-        legend.title = element_text(face = "bold"))
+        legend.position = "none")
 
 
 ## two way anova - condition and day of week on tweet frequency
@@ -623,14 +625,14 @@ frequency_by_weekend <- data_tweets_1%>%
 frequency_by_weekend$day_weekday <- as.factor(frequency_by_weekend$day_weekday)
 frequency_by_weekend$day_weekday <- recode_factor(frequency_by_weekend$day_weekday,`TRUE`="Weekday",`FALSE` = "Weekend")
 
-frequency_by_weekend%>%
+ss2 <- frequency_by_weekend%>%
   ggplot(aes(x = `day_weekday`, y = n, group = Condition, color = Condition)) +
   geom_line(size = 1.5) + 
-  labs(y = "Tweet frequency", x = "Day of the Week", title = "Frequency of Tweets by day") + 
+  labs(y = "", x = "Weekday vs Weekend", title = "") + 
   theme(plot.title = element_text(face = "bold", hjust = 0.5), 
         axis.title.x = element_text(face = "bold"),
         axis.title.y = element_text(face = "bold"),
-        legend.title = element_text(face = "bold"))
+        legend.position = "none")
 
 ## two way anova - condition and day of week on tweet frequency
 frequency_by_weekend$day_weekday <- as.factor(frequency_by_weekend$day_weekday)
@@ -646,28 +648,46 @@ anova_by_weekend <- aov(n ~ Condition*day_weekday, frequency_by_weekend)
 summary(anova_by_weekend)
 
 
+## time of day by condition
+tweets_by_hour <- data_tweets_1%>%
+  count(Condition, hour)%>%
+  pivot_wider(names_from = Condition, values_from = n)
+
+library(formattable)
+formattable(tweets_by_hour)
+
+ss3 <- data_tweets_1%>%
+  count(Condition, hour)%>%
+  ggplot(aes(x = hour, y= n, fill = Condition, color = Condition)) + 
+  geom_smooth() +
+  scale_x_continuous(breaks = seq(0, 23, 2)) +
+  labs(x = "Time of day", y = "Tweet frequency") + 
+  theme(axis.title = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"))
+
+
+(ss1 | ss2) / ss3 
+
+
 ################################################################################
 ############################# Read clean dataset ###############################
 ################################################################################
 
-write_excel_csv(data_tweets_1, "clean_tweets.csv")
+write_csv(data_tweets_1, "clean_tweets.csv")
 data_tweets_1 <- read_csv("clean_tweets.csv")
 
-
-
-unn_data_tweets <- data_tweets_1%>%
-  select(text,created,Condition, TextLength)%>%
-  unnest_tokens(word, text)
-
-
+View(data_tweets_1)
 ################################################################################
-############################## Tokenizing ######################################
+############################### Tokenizing #####################################
 ################################################################################
+data_tweets_1$day_weekday <- as.factor(data_tweets_1$day_weekday)
+data_tweets_1$day_weekday <- recode_factor(data_tweets_1$day_weekday,`TRUE`="Weekday",`FALSE` = "Weekend")
 
 ## Tokenization as explained in https://www.tidytextmining.com/tidytext.html 
 
 unn_data_tweets <- data_tweets_1%>%
-  select(text,created,Condition, TextLength)%>%
+  select(text,screenName,created,Condition,TextLength,timestamp,day_of_week,
+         day_weekday,hour)%>%
   unnest_tokens(word, text)
 
 
@@ -705,8 +725,13 @@ unn_data_tweets_1 <- unn_data_tweets%>%
                       "fc","ba", "fa", "t.co","aa","aaa","aaaa","aaaaa","aaaaaa","aaaaaaa","aaaaaaaa"))
 
 
-## Write and read csv
+## Write csv
 write_csv(unn_data_tweets_1, "unn_data_tweets_1.csv")
+
+################################################################################
+########################## Read tokenized dataset ##############################
+################################################################################
+
 unn_data_tweets_1 <-  read_csv("unn_data_tweets_1.csv")
 
 ################################################################################
@@ -737,17 +762,21 @@ unn_tweets_2 <- unn_tweets%>%
   filter(!word %in% c("ea","fef","bf","ed","eb","bbe","bbf","n","bae","ec","baa","de","fff","ng",
                       "fb","af","cb"))
 
+unn_tweets_2 <- unn_tweets_2%>%
+  group_by(Condition)%>%
+  mutate(word = reorder(word, n))%>%
+  ungroup()
+
 unn_tweets_2%>%
   group_by(Condition)%>%
   slice_max(n, n = 10)%>%
-  ungroup()%>%
-  mutate(word = reorder(word, n))%>%
-  ggplot(aes(n, word, fill = Condition)) +
+    ggplot(aes(n, 
+             fct_reorder(word, n),
+             fill = Condition)) +
   geom_col(show.legend = FALSE) +
   facet_wrap(~Condition, scales = "free_y") +
   labs(x = "Condition",
-       y = NULL) + 
-  scale_x_continuous(labels = function(x) format(x, scientific = FALSE))
+       y = NULL)
 
 
 
@@ -764,7 +793,9 @@ frequency <- unn_tweets_2%>%
 
 frequency <- na.omit(frequency)
 frequency <- frequency%>%
-  filter(!word %in% c("a","m","s","x","itz","ak","al","c","b","k","r","e","df",
+  filter(!word %in% c("a","aaaaaaaaa","aaaaaaaaaa","aaaaaaaaaaa","aaaaaaaaaaaaa",
+  "aaaaaaaaaaaa","aaaaaaaaaaaaaa","aaaaaaaaaaaaaaa","aaaaaaaaaaaaaaaa","aaaaaaaaaaaaaaaaa",
+  "m","s","x","itz","ak","al","c","b","k","r","e","df",
   "a'tin","f","j","d","ae","tsm","aj","ej","the","bini","aespa","ad","ah","ii","sana",
   "t","bts","el","o","h","g","sid","an","ab","vj","eu","da","n","l","la","mo","p","woodz",
   "mz","fn","ph","og","em","aaj","ai","aba","aimeeke","cfc","afc"))
@@ -785,40 +816,550 @@ ggplot(frequency, aes(x = Depressed, y = Healthy)) +
 cor.test(frequency$Depressed, frequency$Healthy)
 
 
+################################################################################
+####### Looking at weighted Log odd  words by condition using tidylo ###########
+################################################################################
+library(tidylo)
 
+log_odds_tweets_nostopwords <- unn_tweets_2%>%
+  bind_log_odds(Condition, word, n)
 
-## Stemming 
-stemmed_tweets <- unn_tweets_2%>%
-  mutate(stem = wordStem(word)) %>%
+log_odds_tweets_nostopwords%>%
   group_by(Condition)%>%
-  count(stem, sort = TRUE)
+  slice_max(log_odds_weighted, n = 10)%>%
+  ungroup()%>%
+  ggplot(aes(log_odds_weighted,
+             fct_reorder(word, log_odds_weighted),
+             fill = Condition)) + 
+  geom_col(show.legend = TRUE) + 
+  facet_wrap(vars(Condition), scales = "free_y") + 
+  labs(x = "log odds (weighted)", y = NULL)
 
-stemmed_tweets$stem <- stemmed_tweets$stem%>%
-  str_replace("^thi$", "thing")%>%
-  str_replace("^thei$", "they")
 
-## Write and read a csv file with tokenized data to avoid loading everything
-write_csv(stemmed_tweets, "stemmed_tweets.csv")
+
+################################################################################
+####################### Sentiment Analysis setup ###############################
+################################################################################
+library(textdata)
+
+## This shows the three types of lexicons in 'textdata' package
+get_sentiments("afinn") ## assigns a value to positive and negative words
+get_sentiments("bing") ## codes words a positive or negative
+get_sentiments("nrc") ## assigns a sentiment to words
+
+
+## First, use lexicon 'bing'
+## Create column with sentiment via bing lexicon
+unn_data_tweets_2 <- unn_data_tweets_1%>%
+  full_join(get_sentiments("bing"), by="word")
+
+
+unn_data_tweets_2$Condition <- as.factor(unn_data_tweets_2$Condition)
+## rename column 'sentiment' as 'sent_bing' and turn it into a factor
+unn_data_tweets_2 <- rename(unn_data_tweets_2, sent_bing = sentiment)
+unn_data_tweets_2$sent_bing <- as.factor(unn_data_tweets_2$sent_bing)
+
+## Second, use lexicon 'nrc'
+## Create column with sentiment via nrc lexicon
+unn_data_tweets_2 <- unn_data_tweets_2%>%
+  full_join(get_sentiments("nrc"), by="word")
+
+## rename column 'sentiment' as 'sent_nrc'
+unn_data_tweets_2 <- rename(unn_data_tweets_2, sent_nrc = sentiment)
+
+## Third, use lexicon 'afinn'
+## Create column with sentiment via afinn lexicon
+unn_data_tweets_2 <- unn_data_tweets_2%>%
+  full_join(get_sentiments("afinn"), by="word")
+
+## rename column 'value' as 'sent_value'
+unn_data_tweets_2 <- rename(unn_data_tweets_2, sent_value = value)
+
+################################################################################
+####################### Running Sentiment Analysis #############################
+################################################################################
+
+## filter NA in nrc_text, nrc_desc, bing_text, and bing_desc
+unn_data_tweets_3 <- unn_data_tweets_2%>%
+  filter(!if_all(-c(sent_bing, sent_nrc, sent_value,Condition), ~ is.na(.)), 
+         if_all(c(sent_bing, sent_nrc, sent_value,Condition), ~ !is.na(.)))
+
+## count how many positive and negative words by condition
+unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  count(sent_bing, sort = TRUE)
+
+
+## plot how many positive and negative words by condition
+unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  ggplot(aes(sent_bing, fill = Condition))+
+  geom_bar(stat = "count") + 
+  labs(x = "Frequency of positive and negative words")
+
+## plot proportion of positive and negative words by condition
+bing <- unn_data_tweets_3%>%
+  ggplot(aes(sent_bing, group = Condition)) + 
+  geom_bar(aes(y = ..prop..,fill = factor(..x..)), stat="count") +
+  geom_text(aes( label = scales::percent(..prop..),
+                 y=..prop..), stat="count", vjust = 1.5, color = "white") +
+  scale_y_continuous(labels=scales::percent) + 
+  labs(x = "", y = "Proportion")+
+  theme(legend.position = "null",
+        axis.title.y = element_text(face= "bold"),
+        axis.text.x = element_text(face = "bold"))+
+  facet_grid(~Condition) 
+
+
+## run chi square between pos/neg words and condition
+tbl = table(chi_sq_bing$Condition, chi_sq_bing$sent_bing)
+chi_sq_bing <- unn_data_tweets_3%>%
+  select(Condition, sent_bing)
+chisq.test(tbl)
+
+
+## count frequency of word description by condition 
+unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  count(sent_nrc, sort=TRUE)
+
+## plot frequency of word description by condition 
+plot_nrc_1 <- unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  count(sent_nrc, sort=TRUE)%>%
+  ggplot(aes(x = `sent_nrc`, y = n, group = Condition, color = Condition)) +
+  geom_line(size = 1.5) + 
+  labs(y = "Frequency", x = "NRC frequency", 
+       title = "") + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        legend.position = "none",
+        legend.title = element_blank(),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+## plot proportion of nrc sentiments by condition
+nrc <- unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  count(sent_nrc)%>%
+  pivot_wider(names_from = sent_nrc, values_from = n)%>%
+  mutate(sum = as.character(rowSums(select(cur_data(), is.numeric))))%>%
+  summarise_if(is.numeric, ~. / as.numeric(sum))%>%
+  pivot_longer(cols = anger:trust, names_to = "sent_nrc", values_to = "n")
+
+
+
+plot_nrc_2 <- nrc%>%
+  ggplot(aes(x=sent_nrc, y=n, fill=Condition)) + 
+  geom_bar(aes(y = n), position = "dodge", stat = "identity") +
+  geom_text(aes(x=sent_nrc, y = n, label= paste0(round((100*n),1),"%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = 1.5, color = "black", size = 2) + 
+  scale_y_continuous(labels=percent) + 
+  labs(x = "NRC proportion", y = "Percentage") +
+  theme(plot.title = element_text
+        (face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.title = element_text(face = "bold"))
+
+
+
+(plot_nrc_1 + plot_nrc_2) + plot_annotation(title = 'Sentiment analysis with NRC Lexicon ',
+                                            theme = theme(plot.title = element_text(hjust = 0.5)))
+
+
+
+
+unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  ggplot(aes(sent_nrc, group = Condition)) + 
+  geom_bar(aes(y = ..prop..,fill = factor(..x..)), stat="count") +
+  geom_text(aes(label = scales::percent(..prop..),
+                 y=..prop..), stat="count", vjust = 1.5, color = "black") +
+  scale_y_continuous(labels=scales::percent) + 
+  labs(x = "Sentiment proportion", y = "Proportion")+
+  theme(legend.position = "null")+
+  facet_grid(~Condition) +  
+  theme(plot.title = element_text
+        (face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        legend.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+## plot Sentiment value by condition
+afinn_plot <- unn_data_tweets_3%>%
+  ggplot(aes(sent_value, fill = Condition))+
+  geom_density(alpha = 0.6)  +
+  labs(y = "Density", x = "Afinn value", 
+       title = "") + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.title.y = element_text(face = "bold"),
+        legend.position = "none")
+
+
+## plot bing to fit patchwork
+bing2 <- unn_data_tweets_3%>%
+  group_by(Condition)%>%
+  count(sent_bing)%>%
+  pivot_wider(names_from = sent_bing, values_from = n)%>%
+  mutate(sum = as.character(rowSums(select(cur_data(), is.numeric))))%>%
+  summarise_if(is.numeric, ~. / as.numeric(sum))%>%
+  pivot_longer(cols = negative:positive, names_to = "sent_bing", values_to = "n")
+
+bing_plot <- bing2%>%
+  ggplot(aes(sent_bing, y=n, fill = Condition)) + 
+  geom_bar(aes(y = n), position = "dodge", stat="identity") +
+  geom_text(aes(x=sent_bing, y = n, label= paste0(round((100*n),1),"%")), 
+            position = position_dodge(width = 0.9), 
+            vjust = 1.5, color = "black", size = 2) +
+  scale_y_continuous(labels=percent) + 
+  labs(x = "Bing", y = "Proportion")+
+  theme(plot.title = element_text
+        (face = "bold", hjust = 0.5), 
+        axis.title.x = element_text(face = "bold"),
+        axis.text.x = element_text(hjust = 1),
+        axis.title.y = element_text(face = "bold"),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "null")
+
+
+plot_nrc_1 + plot_nrc_2 + afinn_plot + bing_plot
+  plot_layout(ncol = 2)
+
+##
+write_csv(unn_data_tweets_2, "up_to_sent_analysis.csv")
+
+
+
+################################################################################
+################## Remove stopwords, stemming, and tf idf ######################
+################################################################################
+unn_data_tweets_2 <- read_csv("sent_analysis.csv")
+
+
+## remove stopwords
+unn_data_tweets_4 <- unn_data_tweets_3%>%
+  anti_join(stop_words)
+
+## stem words
+stemmed_tweets <- unn_data_tweets_4%>%
+  mutate(stem = wordStem(word))
+
+## joined stemmed dataset with full dataset
+unn_dat_tweets_5 <- full_join(stemmed_tweets, unn_data_tweets_4)
+
+## run tf-idf
+tweets_tf_idf <- unn_dat_tweets_5%>%
+  count(Condition, stem, sort = TRUE)%>%
+  bind_tf_idf(stem, Condition, n)
+
+## join tf-idf dataset with full dataset
+unn_dat_tweets_6 <- full_join(tweets_tf_idf, unn_dat_tweets_5)
+
+## look for top tf-idf
+top_tf_idf <- unn_dat_tweets_6%>%
+  arrange(desc(tf_idf))
+  slice_max(tf_idf, n = 10000000) 
+
+  
+##top_tf_idf <- top_tf_idf%>%
+##filter(!stem %in% c("animaldefencebz","fdfa","animalsholbox","anipal","laurenjauregui",
+                      ##"thomassanders","hunchoseann","rramshackled","reapearls","rubina",
+                      ##"patton","thenameisyash","ammiedude","khng","fantasyugh","coffeaxxict",
+                      ##"rubinav","jypetwice","slyfox","fxntasyfull","jlkblackburn","bloodygoatmama",
+                      ##"seungyoun","sadorchestra","ecmclaughlin","rubidilaik","viexkitty",
+                      ##"thebeanweasel","rubiholics","quackitysrose","defendfuriously",
+                      ##"thng","macchuoffcl","gashapun","ashtheromansimp","yash","luliscott",
+                      ##"rolipoii","actorvijay","cupofmatcha","rurumadrid","asgore","ishehnaazgill",
+                      ##"saintsup","miyabihalcus","sagarmediainc","dystoman","bayameyo","adderallblack",
+                      ##"ningning","trong","craigo","gregorywhitta","fdf"))
+
+
+  
+write_csv(unn_dat_tweets_6, "stemmed_tweets.csv")
+write_csv(unn_data_tweets_3, "sent_analysis.csv")
+################################################################################
+######################### Part of speech tagging ###############################
+################################################################################
+
+
+
+################################################################################
+############################# Prep ML models ###################################
+################################################################################
+library(tidymodels)
+
+## load both datasets - stemmed and tokenized tweets 
+token_twts <- read_csv("sent_analysis.csv")
 stemmed_tweets <- read_csv("stemmed_tweets.csv")
+## select variables of interest and make chr as factor
+token_twts_1 <- token_twts%>%
+  select(Condition, timestamp, TextLength,day_of_week,day_weekday,hour,sent_bing,sent_nrc,sent_value)%>%
+  mutate(timestamp = as.numeric(timestamp),
+         day_of_week = factor(day_of_week),
+         day_weekday = factor(day_weekday),
+         sent_bing = factor(sent_bing),
+         sent_nrc = factor(sent_nrc))%>%
+  na.omit()
+
+## naming factor levels and converting to numeric for token_twts
+token_twts_1$day_of_week <- recode(token_twts_1$day_of_week,
+                                   "Mon"= "1","Tue"= "2","Wed"= "3","Thu"= "4",
+                                    "Fri"= "5","Sat"= "6","Sun"= "7")
+token_twts_1$day_of_week <- as.numeric(token_twts_1$day_of_week)
+
+token_twts_1$day_weekday <- recode(token_twts_1$day_weekday  ,
+                                   "Weekday"= "1","Weekend"= "2")
+token_twts_1$day_weekday <- as.numeric(token_twts_1$day_weekday)
+
+token_twts_1$sent_bing <- recode(token_twts_1$sent_bing  ,
+                                 "positive"= "1","negative"= "2")
+token_twts_1$sent_bing <- as.numeric(token_twts_1$sent_bing)
+
+token_twts_1$sent_nrc <- recode(token_twts_1$sent_nrc,
+                                "negative"="1","positive"="2","joy"="3", 
+                                "sadness"="4","anger"="5","trust"="6","fear"="7",
+                                "anticipation"="8","disgust"="9","surprise"="10")
+token_twts_1$sent_nrc <- as.numeric(token_twts_1$sent_nrc)
+
+
+stemmed_tweets_1 <- stemmed_tweets%>%
+  select(Condition, timestamp, TextLength,day_of_week,day_weekday,hour,sent_bing,sent_nrc,sent_value,tf_idf)%>%
+  mutate(timestamp = as.numeric(timestamp),
+         weekday = factor(day_of_week),
+         weekend = factor(day_weekday),
+         bing = factor(sent_bing),
+         nrc = factor(sent_nrc))%>%
+  na.omit()
+
+## naming factor levels and converting to numeric for stemmed_tweets
+stemmed_tweets_1$day_of_week <- recode(stemmed_tweets_1$day_of_week,
+                                   "Mon"= "1","Tue"= "2","Wed"= "3","Thu"= "4",
+                                   "Fri"= "5","Sat"= "6","Sun"= "7")
+stemmed_tweets_1$day_of_week <- as.numeric(stemmed_tweets_1$day_of_week)
+
+stemmed_tweets_1$day_weekday <- recode(stemmed_tweets_1$day_weekday  ,
+                                   "Weekday"= "1","Weekend"= "2")
+stemmed_tweets_1$day_weekday <- as.numeric(stemmed_tweets_1$day_weekday)
+
+stemmed_tweets_1$sent_bing <- recode(stemmed_tweets_1$sent_bing  ,
+                                 "positive"= "1","negative"= "2")
+stemmed_tweets_1$sent_bing <- as.numeric(stemmed_tweets_1$sent_bing)
+
+stemmed_tweets_1$sent_nrc <- recode(stemmed_tweets_1$sent_nrc,
+                                "negative"="1","positive"="2","joy"="3", 
+                                "sadness"="4","anger"="5","trust"="6","fear"="7",
+                                "anticipation"="8","disgust"="9","surprise"="10")
+stemmed_tweets_1$sent_nrc <- as.numeric(stemmed_tweets_1$sent_nrc)
+
+## Split train/test both datasets
+set.seed(123)
+
+token_twts_split <- initial_split(token_twts_1, strata = Condition)
+token_twts_train <- training(token_twts_split)
+token_twts_test <- testing(token_twts_split)
+
+stemmed_tweets_split <- initial_split(stemmed_tweets_1, strata = Condition)
+stemmed_tweets_train <- training(stemmed_tweets_split)
+stemmed_tweets_test <- testing(stemmed_tweets_split)
+
+set.seed(234)
+token_twts_folds <- vfold_cv(token_twts_train, strata = Condition)
+stemmed_tweets_folds <- vfold_cv(stemmed_tweets_train, strata = Condition)
+
+
+## Prep recipe - i.e., feature engineering for both datasets
+## Brute force approach to balancing class sub samples via themis package
+library(textrecipes)
+library(themis)
+
+token_rec <- recipe(Condition ~ timestamp + TextLength + day_of_week + day_weekday + 
+                      hour + sent_bing + sent_nrc + sent_value, 
+         data = token_twts_train)%>%
+  step_downsample(Condition)
 
 
 
+stemmed_rec <- recipe(Condition ~ timestamp + TextLength +  day_of_week + day_weekday + 
+                        hour + sent_bing + sent_nrc + sent_value + tf_idf, 
+                      data = stemmed_tweets_train)%>%
+  step_downsample(Condition)
 
 
+################################################################################
+############################ LASSO Regression ##################################
+################################################################################
+
+## model specification
+token_spec <- multinom_reg(penalty = tune(), mixture = 1)%>%
+  set_mode("classification")%>%
+  set_engine("glmnet")
+
+stemmed_spec <- multinom_reg(penalty = tune(), mixture = 1)%>%
+  set_mode("classification")%>%
+  set_engine("glmnet")
+
+## model workflow
+token_wf <- workflow(token_rec, token_spec)
+stemmed_wf <- workflow(stemmed_rec, stemmed_spec)
+
+## set grid of values for tuning hyper parameter 
+lasso_grid <- grid_regular(penalty(range = c(-5, 0)), levels = 20)
+
+## this accelerates computational processes by allocating more core processing power
+doParallel::registerDoParallel()
+set.seed(2021)
+
+## train models
+token_result <- tune_grid(token_wf,
+                          token_twts_folds,
+                          grid = lasso_grid)
 
 
+stem_result <- tune_grid(stemmed_wf,
+                         stemmed_tweets_folds,
+                         grid = lasso_grid)
+
+## plot how accuracy and roc_auc drop as regularization increases
+autoplot(token_result)
+autoplot(stem_result)
+
+## select best regularization value to tune hyper parameter 
+## we pick best option within one SD
+final_penalty_token <- token_result%>%
+  select_by_one_std_err(metric = "roc_auc", desc(penalty))
+
+final_token <- token_wf%>%
+  finalize_workflow(final_penalty_token)%>%
+  last_fit(token_twts_split)
 
 
+final_penalty_stem <- stem_result%>%
+  select_by_one_std_err(metric = "roc_auc", desc(penalty))
 
-##                                   ###
-## trial with subset (sliced) sample ###
-##                                   ###
-tweets_sliced <- stemmed_tweets%>%
-  slice(321200:321300)
-tweets_sliced
+final_stem <- stemmed_wf%>%
+  finalize_workflow(final_penalty_stem)%>%
+  last_fit(stemmed_tweets_split)
+
+  
+## Evaluate model accuracy
+collect_metrics(final_token)
+collect_metrics(final_stem)
+
+## Plot confusion matrix
+collect_predictions(final_token)%>%
+  conf_mat(Condition, .pred_class)%>%
+  autoplot()
 
 
+collect_predictions(final_stem)%>%
+    conf_mat(Condition, .pred_class)%>%
+    autoplot()
+  
+## Plot ROC to detect depression
+collect_predictions(final_token)%>%
+  roc_curve(Condition, .pred_Depressed)%>%
+  ggplot(aes(1 - specificity, sensitivity)) +
+  geom_abline(slope = 1, color = "gray50", lty = 2, alpha = 0.8) +
+  geom_path(size = 1.5, alpha = 0.7, color = "steelblue4") + 
+  labs(color = NULL)
+  
+
+collect_predictions(final_stem)%>%
+  roc_curve(Condition, .pred_Depressed)%>%
+  ggplot(aes(1 - specificity, sensitivity)) +
+  geom_abline(slope = 1, color = "gray50", lty = 2, alpha = 0.8) +
+  geom_path(size = 1.5, alpha = 0.7, color = "steelblue4") + 
+  labs(color = NULL)
 
 
+################################################################################
+############################### Naive Bayes ####################################
+################################################################################
+library(discrim)
+library(naivebayes)
+
+# model specification
+nb_spec <- naive_Bayes()%>%
+  set_mode("classification")%>%
+  set_engine("naivebayes")
+
+# model workflow
+token_nb_wf <- workflow() %>%
+  add_recipe(token_rec)
+
+stem_nb_wf <- workflow() %>%
+  add_recipe(stemmed_rec)
+
+## fit NB
+nb_fit_token <- token_nb_wf %>%
+  add_model(nb_spec) %>%
+  fit(data = token_twts_train)
+
+nb_fit_stem <- stem_nb_wf %>%
+  add_model(nb_spec) %>%
+  fit(data = stemmed_tweets_train)
+
+
+## train models
+token_nb_wf_2 <- workflow() %>%
+  add_recipe(token_rec) %>%
+  add_model(nb_spec)
+
+stem_nb_wf_2 <- workflow() %>%
+  add_recipe(stemmed_rec) %>%
+  add_model(nb_spec)
+
+
+## estimate how well the model performs
+nb_tw_results <- fit_resamples(
+  token_nb_wf_2, token_twts_folds,
+  control = control_resamples(save_pred = TRUE)
+) 
+
+nb_st_results <- fit_resamples(
+  stem_nb_wf_2, stemmed_tweets_folds,
+  control = control_resamples(save_pred = TRUE)
+)
+
+## collect metrics and predictions
+nb_tw_rs_metrics <- collect_metrics(nb_tw_results)
+nb_tw_rs_predictions <- collect_predictions(nb_tw_results)
+
+nb_st_rs_metrics <- collect_metrics(nb_st_results)
+nb_st_rs_predictions <- collect_predictions(nb_st_results)
+
+
+## plot confusion matrix and ROC
+conf_mat_resampled(nb_tw_results, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+
+collect_predictions(nb_tw_results)%>%
+  roc_curve(Condition, .pred_Depressed)%>%
+  ggplot(aes(1 - specificity, sensitivity)) +
+  geom_abline(slope = 1, color = "gray50", lty = 2, alpha = 0.8) +
+  geom_path(size = 1.5, alpha = 0.7, color = "steelblue4") + 
+  labs(color = NULL)
+
+
+conf_mat_resampled(nb_st_results, tidy = FALSE) %>%
+  autoplot(type = "heatmap")
+
+collect_predictions(nb_st_results)%>%
+  roc_curve(Condition, .pred_Depressed)%>%
+  ggplot(aes(1 - specificity, sensitivity)) +
+  geom_abline(slope = 1, color = "gray50", lty = 2, alpha = 0.8) +
+  geom_path(size = 1.5, alpha = 0.7, color = "steelblue4") + 
+  labs(color = NULL)
 
 
